@@ -1,4 +1,5 @@
 import abc
+import asyncio
 
 from conway.application.application                                 import Application
 from conway.util.json_utils                                         import JSON_Utils
@@ -7,7 +8,7 @@ from conway_acceptance.test_logic.acceptance_test_case              import Accep
 
 from conway_ops.onboarding.user_profile                             import UserProfile
 from conway_ops.util.git_branches                                   import GitBranches
-from conway_ops.util.github_client                                  import GitHub_Client
+from limon_ops.util.github_client                                  import GitHub_Client
 
 # GOTCHA
 #
@@ -60,6 +61,12 @@ class RepoManipulationTestCase(AcceptanceTestCase, abc.ABC):
         :returns: the status from GitHub, as a JSON dictionary, on the attempt to create the GitRepo `repo_name`.
         :rtype: dict
         '''
+        #Application.app().log(f"~~~~    limon      RepoManipulatonTestCase::_create_github_repos   ~~~~ ")
+
+        return asyncio.run(self._supervisor(ctx))
+
+    async def _supervisor(self, ctx):
+
         sdlc_root                                   = f"{ctx.manifest.path_to_seed()}/sdlc_root"
         profile_path                                = f"{sdlc_root}/sdlc.profiles/{self.profile_name}/profile.toml" 
         P                                           = UserProfile(profile_path)  
@@ -76,37 +83,54 @@ class RepoManipulationTestCase(AcceptanceTestCase, abc.ABC):
         #       owner of the repo.
         #
         github                                      = GitHub_Client(github_owner = P.GH_ORGANIZATION)
+        result_l                                    =  []
 
         # GitHub HTTP call is something like
         #
         #   'GET https://api.github.com/users/testrobot-ccl/repos'
         #
-        pre_existing_repos                          = [r["name"] for r in github.GET(resource = "users", 
-                                                                                     sub_path = "/repos")]
+        async with github:
+            pre_existing_repos                      = await github.GET( resource    = "users", 
+                                                                        sub_path    = "/repos")
+            pre_existing_repos_names                = [r["name"] for r in pre_existing_repos]
 
-        for repo_name in P.REPO_LIST(project_name):
-             
+            to_do                                   = [self._create_one_repo(repo_name, github, pre_existing_repos_names)
+                                                       for repo_name in P.REPO_LIST(project_name)]
 
-            if repo_name in pre_existing_repos:
+            to_do_iter                              = asyncio.as_completed(to_do)
 
-                # Must delete this old repo, so that we can subsequently create it fresh. We do a
-                #
-                #   DELETE https://api.github.com/repos/testrobot-ccl/{repo_name}
-                #
-                removal_data                        = github.DELETE(resource = "repos",
+            for coro in to_do_iter:
+                coro_result                         = await coro
+                result_l.append(coro_result)
+
+        Application.app().log(f"List of remote repos re-created: {result_l}")
+        return result_l
+
+        
+      
+    async def _create_one_repo(self, repo_name, github, pre_existing_repos_names):
+        '''
+        '''
+        if repo_name in pre_existing_repos_names:
+
+            # Must delete this old repo, so that we can subsequently create it fresh. We do a
+            #
+            #   DELETE https://api.github.com/repos/testrobot-ccl/{repo_name}
+            #
+            removal_data                            = await github.DELETE(
+                                                                    resource = "repos",
                                                                     sub_path = f"/{repo_name}")
-                nice_removal_data                   = JSON_Utils.nice(removal_data)
-                Application.app().log(f"Removed pre-existing repo '{repo_name}' so we can re-create it - response was {nice_removal_data}")
-                #raise ValueError(f"Can't create repo '{repo_name}' because it already exists in '{P.REMOTE_ROOT}'")
+            nice_removal_data                       = JSON_Utils.nice(removal_data)
+            Application.app().log(f"Removed pre-existing repo '{repo_name}' so we can re-create it - response was {nice_removal_data}")
 
-            # Create the repo. We do 
-            #
-            #       POST https://api.github.com/user/repos
-            #
-            # GOTCHA: the "user" resource is treated differenty by the GitHub_RepoInspector because the
-            #           {owner} is not added to the URL
-            #
-            repo_creation_result                    = github.POST(
+        # Create the repo. We do 
+        #
+        #       POST https://api.github.com/user/repos
+        #
+        # GOTCHA: the "user" resource is treated differenty by the GitHub_RepoInspector because the
+        #           {owner} is not added to the URL
+        #
+        repo_creation_result                        = await github.POST(
                                                             resource        = "user",
                                                             sub_path        = "/repos",
                                                             body            = 
@@ -115,59 +139,60 @@ class RepoManipulationTestCase(AcceptanceTestCase, abc.ABC):
                                                                 "auto_init":        True, # So a first commit with empty README is done
                                                                 })
             
-            #nice_data                               = JSON_Utils.nice(data) # This will show a lot of information
-            repo_url                                = repo_creation_result["html_url"]
-            Application.app().log(f"Created repo '{repo_name}' with URL {repo_url}")
+        repo_url                                    = repo_creation_result["html_url"]
+        Application.app().log(f"Created repo '{repo_name}' with URL {repo_url}")
 
 
-            # We need to create the integration branch, but for that we first need to get the
-            # the sha for the last commit on the master branch. For that we do:
-            #
-            #       GET https://api.github.com/repos/testrobot-ccl/{repo_name}/git/refs/heads
-            #
-            heads_data                                  = github.GET(
+        # We need to create the integration branch, but for that we first need to get the
+        # the sha for the last commit on the master branch. For that we do:
+        #
+        #       GET https://api.github.com/repos/testrobot-ccl/{repo_name}/git/refs/heads
+        #
+        heads_data                                  = await github.GET(
                                                             resource        = "repos",
                                                             sub_path        = f"/{repo_name}/git/refs/heads",
                                                             )
-            # heads_data is something like
-            #
-            #    [
-            #        {
-            #            "ref": "refs/heads/master",
-            #            "node_id": "REF_kwDOL6SBFbFyZWZzL2hlYWRzL21hc3Rlcg",
-            #            "url": "https://api.github.com/repos/testrobot-ccl/scenario_8002.svc/git/refs/heads/master",
-            #            "object": {
-            #                "sha": "3f69985b23cf38dca098b3b867e28bf06a8a0aa5",
-            #                "type": "commit",
-            #                "url": "https://api.github.com/repos/testrobot-ccl/scenario_8002.svc/git/commits/3f69985b23cf38dca098b3b867e28bf06a8a0aa5"
-            #            }
-            #        },
-            #           ...
-            #    ]     
-            #
-            # So we extract the master branch, and from it get the SHA of interest
-            #       
-            master                                  = [elt for elt in heads_data if elt["ref"]  == "refs/heads/master"][0]
-            sha                                     = master["object"]["sha"]
+        # heads_data is something like
+        #
+        #    [
+        #        {
+        #            "ref": "refs/heads/master",
+        #            "node_id": "REF_kwDOL6SBFbFyZWZzL2hlYWRzL21hc3Rlcg",
+        #            "url": "https://api.github.com/repos/testrobot-ccl/scenario_8002.svc/git/refs/heads/master",
+        #            "object": {
+        #                "sha": "3f69985b23cf38dca098b3b867e28bf06a8a0aa5",
+        #                "type": "commit",
+        #                "url": "https://api.github.com/repos/testrobot-ccl/scenario_8002.svc/git/commits/3f69985b23cf38dca098b3b867e28bf06a8a0aa5"
+        #            }
+        #        },
+        #           ...
+        #    ]     
+        #
+        # So we extract the master branch, and from it get the SHA of interest
+        #       
+        master                                      = [elt for elt in heads_data if elt["ref"]  == "refs/heads/master"][0]
+        sha                                         = master["object"]["sha"]
 
-            # Now create the integration branch on the repo. We will do a 
-            #
-            #       POST https://api.github.com/repos/testrobot-ccl/{repo_name}/git/refs
-            #
-            integration                             = GitBranches.INTEGRATION_BRANCH.value
-            branch_creation_result                  = github.POST(
+        # Now create the integration branch on the repo. We will do a 
+        #
+        #       POST https://api.github.com/repos/testrobot-ccl/{repo_name}/git/refs
+        #
+        integration                                 = GitBranches.INTEGRATION_BRANCH.value
+        branch_creation_result                      = await github.POST(
                                                             resource        = "repos",
                                                             sub_path        = f"/{repo_name}/git/refs",
                                                             body            = {
                                                                 "ref":      f"refs/heads/{integration}",
                                                                 "sha":      f"{sha}"
                                                             })
-            
-            #nice_data                               = JSON_Utils.nice(data) # For debugging - will show all data returned
-            branch_url                               = branch_creation_result["url"]
-            Application.app().log(f"Created '{integration}' branch in '{repo_name}' with URL {branch_url}")
         
-        
+        branch_url                                  = branch_creation_result["url"]
+        Application.app().log(f"Created '{integration}' branch in '{repo_name}' with URL {branch_url}")
+
+        # By away of status, return the repo_name so the caller knows which repo was created
+        return repo_name
+       
+       
 
     def _get_files(self, root_folder):
         '''

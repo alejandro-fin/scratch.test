@@ -5,9 +5,9 @@ from conway.util.secrets                                                        
 
 from conway_acceptance.test_logic.acceptance_test_notes                             import AcceptanceTestNotes
 
-from conway_ops.onboarding.repo_bundle                                              import RepoBundle
 from conway_ops.onboarding.repo_bundle_subset                                       import RepoBundleSubset
-from conway_ops.onboarding.repo_setup                                               import RepoSetup
+from limon_ops.onboarding.repo_setup                                                import RepoSetup
+
 from conway_ops.repo_admin.branch_lifecycle_manager                                 import BranchLifecycleManager
 from conway_ops.util.git_branches                                                   import GitBranches
 
@@ -46,7 +46,7 @@ class TestRepoSetup(RepoManipulationTestCase):
             remote_repos_root                           = ctx.test_database.remote_repos_hub.hub_root()
 
             # Pre-flight: create the repos in question
-            self._create_github_repos(ctx)
+            creation_result                             = self._create_github_repos(ctx)
 
             # Now we can do the test: setup local repos that are cloned from GitHub
             #
