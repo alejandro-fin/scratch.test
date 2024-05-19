@@ -1,6 +1,7 @@
 import sys                                                                          as _sys
 
 from conway.database.data_accessor                                                  import DataAccessor
+from conway.util.profiler                                                           import Profiler
 from conway.util.secrets                                                            import Secrets
 
 from conway_acceptance.test_logic.acceptance_test_notes                             import AcceptanceTestNotes
@@ -61,14 +62,15 @@ class TestRepoSetup(RepoManipulationTestCase):
             #
             # So we copy a previously prepared class to the ops repo:
             #
-            with DataAccessor(url = f"{local_repos_root}") as ax:
-                ax.copy_from(src_url=f"{ctx.manifest.path_to_seed()}/files_to_add")
+            with Profiler("Creating branch report"):
+                with DataAccessor(url = f"{local_repos_root}") as ax:
+                    ax.copy_from(src_url=f"{ctx.manifest.path_to_seed()}/files_to_add")
 
-            branch_manager                              = self._branch_manager(ctx)
+                branch_manager                          = self._branch_manager(ctx)
 
 
-            branch_manager.create_repo_report(publications_folder           = ctx.manifest.path_to_actuals(), 
-                                                mask_nondeterministic_data  = True)
+                branch_manager.create_repo_report(publications_folder           = ctx.manifest.path_to_actuals(), 
+                                                    mask_nondeterministic_data  = True)
 
             self.assert_database_structure(ctx, excels_to_compare)  
 
