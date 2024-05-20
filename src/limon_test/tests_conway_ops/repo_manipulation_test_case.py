@@ -2,6 +2,7 @@ import abc
 import asyncio
 
 from conway.application.application                                 import Application
+from conway.async_utils.ushering_to                                 import UsheringTo
 from conway.util.json_utils                                         import JSON_Utils
 
 from conway_acceptance.test_logic.acceptance_test_case              import AcceptanceTestCase
@@ -90,18 +91,15 @@ class RepoManipulationTestCase(AcceptanceTestCase, abc.ABC):
         #   'GET https://api.github.com/users/testrobot-ccl/repos'
         #
         async with github:
+            
             pre_existing_repos                      = await github.GET( resource    = "users", 
                                                                         sub_path    = "/repos")
             pre_existing_repos_names                = [r["name"] for r in pre_existing_repos]
 
-            to_do                                   = [self._create_one_repo(repo_name, github, pre_existing_repos_names)
-                                                       for repo_name in P.REPO_LIST(project_name)]
+            async with UsheringTo(result_l) as usher:
+                for repo_name in P.REPO_LIST(project_name):
+                    usher                           += self._create_one_repo(repo_name, github, pre_existing_repos_names)
 
-            to_do_iter                              = asyncio.as_completed(to_do)
-
-            for coro in to_do_iter:
-                coro_result                         = await coro
-                result_l.append(coro_result)
 
         Application.app().log(f"List of remote repos re-created: {result_l}")
         return result_l

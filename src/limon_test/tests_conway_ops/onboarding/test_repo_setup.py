@@ -9,7 +9,7 @@ from conway_acceptance.test_logic.acceptance_test_notes                         
 from conway_ops.onboarding.repo_bundle_subset                                       import RepoBundleSubset
 from limon_ops.onboarding.repo_setup                                                import RepoSetup
 
-from conway_ops.repo_admin.branch_lifecycle_manager                                 import BranchLifecycleManager
+from limon_ops.repo_admin.branch_lifecycle_manager                                 import BranchLifecycleManager
 from conway_ops.util.git_branches                                                   import GitBranches
 
 # Make sure the limon test app is used, by importing *first* the package for limon_test before the conway_test
